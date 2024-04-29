@@ -284,3 +284,45 @@ TaskManager向JobMaster offer Slot资源。
 JobMaster将任务对应的task发送到TaskManager上执行。
 ```
 
+##### DataStream API
+
+###### 执行环境
+
+```
+1）getExecutionEnvironment
+最简单的方式，就是直接调用getExecutionEnvironment方法。它会根据当前运行的上下文直接得到正确的结果：如果程序是独立运行的，就返回一个本地执行环境；如果是创建了jar包，然后从命令行调用它并提交到集群执行，那么就返回集群的执行环境。也就是说，这个方法会根据当前运行的方式，自行决定该返回什么样的运行环境。
+StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+这种方式，用起来简单高效，是最常用的一种创建执行环境的方式。
+
+2）createLocalEnvironment
+这个方法返回一个本地执行环境。可以在调用时传入一个参数，指定默认的并行度；如果不传入，则默认并行度就是本地的CPU核心数。
+StreamExecutionEnvironment localEnv = StreamExecutionEnvironment.createLocalEnvironment();
+3）createRemoteEnvironment
+这个方法返回集群执行环境。需要在调用时指定JobManager的主机名和端口号，并指定要在集群中运行的Jar包。
+StreamExecutionEnvironment remoteEnv = StreamExecutionEnvironment
+  		.createRemoteEnvironment(
+    		"host",                   // JobManager主机名
+    		1234,                     // JobManager进程端口号
+   			"path/to/jarFile.jar"  // 提交给JobManager的JAR包
+		); 
+在获取到程序执行环境后，我们还可以对执行环境进行灵活的设置。比如可以全局设置程序的并行度、禁用算子链，还可以定义程序的时间语义、配置容错机制。
+
+
+触发程序执行
+需要注意的是，写完输出（sink）操作并不代表程序已经结束。因为当main()方法被调用时，其实只是定义了作业的每个执行操作，然后添加到数据流图中；这时并没有真正处理数据——因为数据可能还没来。Flink是由事件驱动的，只有等到数据到来，才会触发真正的计算，这也被称为“延迟执行”或“懒执行”。
+所以我们需要显式地调用执行环境的execute()方法，来触发程序执行。execute()方法将一直等待作业完成，然后返回一个执行结果（JobExecutionResult）。
+env.execute();
+```
+
+###### 源算子
+
+```
+在Flink1.12以前，旧的添加source的方式，是调用执行环境的addSource()方法：
+DataStream<String> stream = env.addSource(...);
+
+方法传入的参数是一个“源函数”（source function），需要实现SourceFunction接口。
+从Flink1.12开始，主要使用流批统一的新Source架构：
+DataStreamSource<String> stream = env.fromSource(…)
+Flink直接提供了很多预实现的接口，此外还有很多外部连接工具也帮我们实现了对应的Source，通常情况下足以应对我们的实际需求。
+```
+

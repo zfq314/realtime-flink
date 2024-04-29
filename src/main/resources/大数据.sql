@@ -910,7 +910,14 @@ mr-->DAG框架（tez）--->Spark流批处理框架，内存计算（伪实时）
 
 
 
+select  djh,SUM(jz) as jz,ROUND(SUM(ifnull(jcgfje,0) + ifnull(FJGFJE,0)+IFNULL(jgfje,0)+IFNULL(dbgfje,0) ))   as je from t_ka_splsz where djm='调拨入库单' and rq>='2024-04-20' and jsmc<>'千足镶嵌' GROUP BY djh
 
+order by djh ;
+
+select allocation_code,total_gold_weight,total_amount from t_from_allocation_in_warehouse where  approve_status=1 and `status`=0  and allocation_code in (
+select  djh  from t_ka_splsz where djm='调拨入库单' and rq>='2024-04-20' and jsmc<>'千足镶嵌' GROUP BY djh
+
+order by djh ) order by allocation_code ;
 
 
 

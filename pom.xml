@@ -29,9 +29,9 @@
             <version>${logging.log4j.version}</version>
         </dependency>
         <dependency>
-        <groupId>org.apache.logging.log4j</groupId>
-        <artifactId>log4j-core</artifactId>
-        <version>${logging.log4j.version}</version>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-core</artifactId>
+            <version>${logging.log4j.version}</version>
         </dependency>
 
 
@@ -53,6 +53,12 @@
             <version>${slf4j.version}</version>
             <!-- 注意，若无type为jar则报错-->
             <type>jar</type>
+        </dependency>
+        <!-- 从文件中读取数据依赖jar-->
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-connector-files</artifactId>
+            <version>${flink.version}</version>
         </dependency>
 
     </dependencies>
