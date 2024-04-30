@@ -943,30 +943,101 @@ order by djh ) order by allocation_code ;
 
 -- --------------------------------------------------------------------------------------------------------------
 
+-- 海南展厅
+
+ select * from t_ka_splsz where djh in (
+ 'TYDBR202404180523',
+'TYDBR202404180526',
+'TYDBR202404180680',
+'TYDBR202404190040',
+'TYDBR202404190042',
+'TYDBR202404190054',
+'TYDBR202404190063',
+'TYDBR202404190064',
+'TYDBR202404190066',
+'TYDBR202404190068',
+'TYDBR202404190205'
+ )
+
+
+--  江西展厅
+ select * from t_ka_splsz where djh in (
+'TYDBR202404200029',
+'TYDBR202404210031',
+'TYDBR202404210041',
+'TYDBR202404210056',
+'TYDBR202404210057',
+'TYDBR202404210059',
+'TYDBR202404220038',
+'TYDBR202404220045',
+'TYDBR202404220046',
+'TYDBR202404220048',
+'TYDBR202404220051',
+'TYDBR202404220053',
+'TYDBR202404230016',
+'TYDBR202404240034',
+'TYDBR202404240087',
+'TYDBR202404260025'
+ )
+
+
+-- 南京展厅
+
+ select * from t_ka_splsz where djh in (
+ 'SJDRD202404010047',
+'TYDBR202404181022',
+'TYDBR202404190017',
+'TYDBR202404190043',
+'TYDBR202404190058',
+'TYDBR202404190067',
+'TYDBR202404190081',
+'TYDBR202404190088',
+'TYDBR202404190105',
+'TYDBR202404190108',
+'TYDBR202404190114',
+'TYDBR202404190129',
+'TYDBR202404190133',
+'TYDBR202404190139',
+'TYDBR202404190151',
+'TYDBR202404190226'
+ )
+
+ -- 南京展厅反审核，金重为负，但是工费还是整数需要修改
+ select * from t_ka_splsz where djh in (
+'DBRK202404221670' 
+)
+
+
+
+
+
+-- 南京
+
+select  * from t_ka_splsz where djh='TYDBR202404181021'
+select * from t_from_allocation_in_warehouse_detail where allocation_identity =(select allocation_identity from t_from_allocation_in_warehouse where allocation_code='TYDBR202404181021') 、
+
+
+select  * from t_ka_splsz where djh='SJDRD202404210096'
+select * from t_from_allocation_in_warehouse_detail where allocation_identity =(select allocation_identity from t_from_allocation_in_warehouse where allocation_code='SJDRD202404210096') 
 
 
 
 
 
 
+-- 江西 
+select  * from t_ka_splsz where djh='TYDBR202404190146'
+select * from t_from_allocation_in_warehouse_detail where allocation_identity =(select allocation_identity from t_from_allocation_in_warehouse where allocation_code='TYDBR202404190146') 
 
 
 
+select  * from t_ka_splsz where djh='TYDBR202404230016'
+select * from t_from_allocation_in_warehouse_detail where allocation_identity =(select allocation_identity from t_from_allocation_in_warehouse where allocation_code='TYDBR202404230016') 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
+-- 海南
+select  * from t_ka_splsz where djh='TYDBR202404180508'
+select * from t_from_allocation_in_warehouse_detail where allocation_identity =(select allocation_identity from t_from_allocation_in_warehouse where allocation_code='TYDBR202404180508') 
 
 
 -- --------------------------------------------------------------------------------------------------------------
