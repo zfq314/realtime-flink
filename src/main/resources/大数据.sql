@@ -1042,6 +1042,9 @@ select * from t_from_allocation_in_warehouse_detail where allocation_identity =(
 
 -- --------------------------------------------------------------------------------------------------------------
 
+-- 根据生日计算年龄
+
+select user_id,birthday,if(datediff(CURRENT_DATE,CONCAT(substr(CURRENT_DATE,0,4),substr(birthday,5,7)))>=0,(substr(CURRENT_DATE,0,4) - substr(birthday,0,4)),(substr(CURRENT_DATE,0,4) - substr(birthday,0,4)-1)) from user_info;
 
 
 
@@ -1050,14 +1053,16 @@ select * from t_from_allocation_in_warehouse_detail where allocation_identity =(
 
 
 
+-- 清空缓存 
+
+echo "开始清除缓存"
+sync;sync;sync #写入硬盘，防止数据丢失
+sleep 10 #延迟10秒
+echo 3 > /proc/sys/vm/drop_caches
 
 
 
-
-
-
-
-
+memory_free_up
 
 
 
