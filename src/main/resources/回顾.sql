@@ -176,10 +176,12 @@
 										        Hive 在读数据的时候，可以只读取查询中所需要用到的列，而忽略其他的列。这样做可以节省读取开销：中间表存储开销和数据整合开销。	
 										        ## 列裁剪，取数只取查询中需要用到的列，默认是true
 												set hive.optimize.cp = true; 	
+
 										3、谓词下推
 										        将 SQL 语句中的 where 谓词逻辑都尽可能提前执行，减少下游处理的数据量。对应逻辑优化器是 PredicatePushDown 。		
                                                 ## 默认是true
 												set hive.optimize.ppd=true;
+
 										4、分区裁剪
 										        列裁剪就是在查询时只读取需要的列，分区裁剪就是只读取需要的分区 。当列很多或者数据量很大时，如果 select * 或者不指定分区，全列扫描和全表扫描效率都很低 。
 										        在查询的过程中只选择需要的分区，可以减少读入的分区数目，减少读入的数据量 。
@@ -209,6 +211,7 @@
 												set mapred.min.split.size.per.node=1;  // 服务器节点 
 												## 一个机架上split的最少值 
 												set mapred.min.split.size.per.rack=1;  // 服务器机架
+
 										6、合理设置MapTask并行度
 												第一：MapReduce中的MapTask的并行度机制
 												 Map数过大：当输入文件特别大，MapTask 特别多，每个计算节点分配执行的 MapTask 都很多，这时候可以考虑减少 MapTask 的数量 ，增大每个 MapTask 处理的数据量。如果 MapTask 过多，最终生成的结果文件数会太多 。
@@ -289,9 +292,177 @@
 													大表Join大表
 														1、空key过滤：有时join超时是因为某些key对应的数据太多，而相同key对应的数据都会发送到相同的 reducer上，从而导致内存不够。此时我们应该仔细分析这些异常的key，很多情况下，这些key对应的数据是异常数据，我们需要在SQL语句中进行过滤。         
 														2、空key转换：有时虽然某个key为空对应的数据很多，但是相应的数据不是异常数据，必须要包含在join 的结果中，此时我们可以表a中key为空的字段赋一个随机的值，使得数据随机均匀地分到不同的reducer 上 。
-															
+
+										9、 启用 MapJoin
+													这个优化措施，但凡能用就用！
+													大表 join 小表 小表满足需求：小表数据小于控制条件时 。
+													MapJoin 是将 join 双方比较小的表直接分发到各个 map 进程的内存中，在 map 进程中进行 join 操作，这样就不用进行 reduce 步骤，从而提高了速度。只有 join 操作才能启用 MapJoin 。		
+													## 是否根据输入小表的大小，自动将reduce端的common join 转化为map join，将小表刷入内存中。 
+													## 对应逻辑优化器是MapJoinProcessor 
+													set hive.auto.convert.join = true; 
+
+													## 刷入内存表的大小(字节) 
+													set hive.mapjoin.smalltable.filesize = 25000000; 
+
+													## hive会基于表的size自动的将普通join转换成mapjoin 
+													set hive.auto.convert.join.noconditionaltask=true; 
+
+													## 多大的表可以自动触发放到内层 LocalTask 中，默认大小10M 
+													set hive.auto.convert.join.noconditionaltask.size=10000000;
+
+													Hive 可以进行多表 Join。Join 操作尤其是 Join 大表的时候代价是非常大的。MapJoin 特别适合大小表 join 的情况。在Hive join场景中，一般总有一张相对小的表和一张相对大的表，小表叫 build table，大表叫 probe table。Hive 在解析带 join 的 SQL 语句时，会默认将最后一个表作为 probe table，将前面的表作为 build table 并试图将它们读进内存。如果表顺序写反，probe table 在前面，引发 OOM 的风险就高了。在维度建模数据仓库中，事实表就是 probe table，维度表就是 build table。这种 Join 方式在 map 端直接完成 join 过程，消灭了 reduce，效率很高。而且 MapJoin 还支持非等值连接 。
+
+    											    当 Hive 执行 Join 时，需要选择哪个表被流式传输（stream），哪个表被缓存（cache）。Hive 将JOIN 语句中的最后一个表用于流式传输，因此我们需要确保这个流表在两者之间是最大的。如果要在不同的 key 上 join 更多的表，那么对于每个 join 集，只需在 ON 条件右侧指定较大的表 。
+
+    									10、Join数据倾斜优化
+													在编写 Join 查询语句时，如果确定是由于 join 出现的数据倾斜，那么请做如下设置：	    	
+													# join的键对应的记录条数超过这个值则会进行分拆，值根据具体数据量设置 
+													set hive.skewjoin.key=100000; 
+
+													# 如果是join过程出现倾斜应该设置为true 
+													set hive.optimize.skewjoin=false;
+													如果开启了，在 Join 过程中 Hive 会将计数超过阈值 hive.skewjoin.key（默认100000）的倾斜 key 对应的行临时写进文件中，然后再启动另一个 job 做 map join 生成结果。
+        											通过 hive.skewjoin.mapjoin.map.tasks 参数还可以控制第二个 job 的 mapper 数量，默认10000 。
+													set hive.skewjoin.mapjoin.map.tasks=10000;
+
+										11、CBO优化
+        											join的时候表的顺序的关系：前面的表都会被加载到内存中。后面的表进行磁盘扫描 。
+
+													select a., b., c.* from a join b on a.id = b.id join c on a.id = c.id ;
+													Hive 自 0.14.0 开始，加入了一项 Cost based Optimizer 来对 HQL 执行计划进行优化，这个功能通过 hive.cbo.enable 来开启。在 Hive 1.1.0 之后，这个 feature 是默认开启的，它可以 自动优化 HQL 中多个 Join 的顺序，并选择合适的 Join 算法 。
+
+													CBO，成本优化器，代价最小的执行计划就是最好的执行计划。传统的数据库，成本优化器做出最优化的执行计划是依据统计信息来计算的。Hive 的成本优化器也一样。
+
+													Hive 在提供最终执行前，优化每个查询的执行逻辑和物理执行计划。这些优化工作是交给底层来完成的。根据查询成本执行进一步的优化，从而产生潜在的不同决策：如何排序连接，执行哪种类型的连接，并行度等等。要使用基于成本的优化（也称为CBO），请在查询开始设置以下参数：
+													set hive.cbo.enable=true; 
+													set hive.compute.query.using.stats=true; 
+													set hive.stats.fetch.column.stats=true; 
+													set hive.stats.fetch.partition.stats=true;	
+
+									    12、怎样做笛卡尔积
+											        当 Hive 设定为严格模式（hive.mapred.mode=strict）时，不允许在 HQL 语句中出现笛卡尔积，这实 际说明了 Hive 对笛卡尔积支持较弱。因为找不到 Join key，Hive 只能使用 1 个 reducer 来完成笛卡尔积 。
+											        当然也可以使用 limit 的办法来减少某个表参与 join 的数据量，但对于需要笛卡尔积语义的需求来说，经常是一个大表和一个小表的 Join 操作，结果仍然很大（以至于无法用单机处理），这时 MapJoin 才是最好的解决办法。MapJoin，顾名思义，会在 Map 端完成 Join 操作。这需要将 Join 操作的一个或多个表完全读入内存。
+											        PS：MapJoin 在子查询中可能出现未知 BUG。在大表和小表做笛卡尔积时，规避笛卡尔积的方法是， 给 Join 添加一个 Join key，原理很简单：将小表扩充一列 join key，并将小表的条目复制数倍，join key 各不相同；将大表扩充一列 join key 为随机数。
+											 精髓就在于复制几倍，最后就有几个 reduce 来做，而且大表的数据是前面小表扩张 key 值范围里面随机出来的，所以复制了几倍 n，就相当于这个随机范围就有多大 n，那么相应的，大表的数据就被随机的分为了 n 份。并且最后处理所用的 reduce 数量也是 n，而且也不会出现数据倾斜 。				
+
+										13、Group By 优化
+													默认情况下，Map 阶段同一个 Key 的数据会分发到一个 Reduce 上，当一个 Key 的数据过大时会产生数据倾斜。进行 group by 操作时可以从以下两个方面进行优化：	
+
+													1. Map端部分聚合 
+																   事实上并不是所有的聚合操作都需要在 Reduce 部分进行，很多聚合操作都可以先在 Map 端进行部分聚合，然后在 Reduce 端的得出最终结果 。 	
+																   ## 开启Map端聚合参数设置 
+																   set hive.map.aggr=true; 
+																   ## 设置map端预聚合的行数阈值，超过该值就会分拆job，默认值100000 
+																   set hive.groupby.mapaggr.checkinterval=100000
+													2. 有数据倾斜时进行负载均衡
+																			 当 HQL 语句使用 group by 时数据出现倾斜时，如果该变量设置为 true，那么 Hive 会自动进行负载均衡。策略就是把 MapReduce 任务拆分成两个：第一个先做预汇总，第二个再做最终汇总 。	
+																			 # 自动优化，有数据倾斜的时候进行负载均衡（默认是false）
+																			 set hive.groupby.skewindata=false;		
+																			 当选项设定为 true 时，生成的查询计划有两个 MapReduce 任务 。
+																			1、在第一个 MapReduce 任务中，map 的输出结果会随机分布到 reduce 中，每个 reduce 做部分聚合操作，并输出结果，这样处理的结果是相同的group by key有可能分发到不同的 reduce 中，从而达到负载均衡的目的；         
+																			2、第二个 MapReduce 任务再根据预处理的数据结果按照 group by key 分布到各个 reduce 中，最 后完成最终的聚合操作。
+																			        Map 端部分聚合：并不是所有的聚合操作都需要在 Reduce 端完成，很多聚合操作都可以先在 Map 端进行部分聚合，最后在 Reduce 端得出最终结果，对应的优化器为 GroupByOptimizer 。   
+
+										14、Order By优化
+										
+													order by 只能是在一个 reduce 进程中进行，所以如果对一个大数据集进行 order by ，会导致一个 reduce 进程中处理的数据相当大，造成查询执行缓慢 。
+													1、在最终结果上进行order by，不要在中间的大数据集上进行排序。如果最终结果较少，可以在一个 reduce上进行排序时，那么就在最后的结果集上进行order by。
+													2、如果是取排序后的前N条数据，可以使用distribute by和sort by在各个reduce上进行排序后前N 条，然后再对各个reduce的结果集合合并后在一个reduce中全局排序，再取前N条，因为参与全局排序的 order by的数据量最多是reduce个数 * N，所以执行效率会有很大提升。在Hive中，关于数据排序，提供了四种语法，一定要区分这四种排序的使用方式和适用场景。
+													1、order by：全局排序，缺陷是只能使用一个reduce
+													2、sort by：单机排序，单个reduce结果有序 
+													3、cluster by：对同一字段分桶并排序，不能和sort by连用 
+													4、distribute by+sort by：分桶，保证同一字段值只存在一个结果文件当中，结合sort by保证每 个reduceTask结果有序
+													        Hive HQL 中的 order by 与其他 SQL 方言中的功能一样，就是将结果按某字段全局排序，这会导致所有 map 端数据都进入一个 reducer 中，在数据量大时可能会长时间计算不完 。
+													        如果使用 sort by，那么还是会视情况启动多个 reducer 进行排序，并且保证每个 reducer 内局部有序。为了控制 map 端数据分配到 reducer 的 key，往往还要配合 distribute by 一同使用。如果不加 distribute by 的话，map 端数据就会随机分配到 reducer。									        
+
+										15、Count Distinct优化
+											    当要统计某一列去重数时，如果数据量很大，count(distinct) 就会非常慢，原因与 order by 类似，count(distinct) 逻辑只会有很少的 reducer 来处理。这时可以用 group by 来改写：
+
+										16、怎样写in/exists语句
+											     在Hive的早期版本中，in/exists语法是不被支持的，但是从 hive-0.8x 以后就开始支持这个语法。但是不推荐使用这个语法。虽然经过测验，Hive-2.3.6 也支持 in/exists 操作，但还是推荐使用 Hive 的一个高效替代方案：left semi join	        			        
 
 
+										17、使用 vectorization 技术
+											        在计算类似 scan, filter, aggregation 的时候， vectorization 技术以设置批处理的增量大小为 1024 行单次来达到比单条记录单次获得更高的效率。
+													set hive.vectorized.execution.enabled=true ; 
+													set hive.vectorized.execution.reduce.enabled=true;
+
+										18、多重模式
+        											如果你碰到一堆SQL，并且这一堆SQL的模式还一样。都是从同一个表进行扫描，做不同的逻辑。有可优化的地方：如果有n条SQL，每个SQL执行都会扫描一次这张表 。
+											        如果一个 HQL 底层要执行 10 个 Job，那么能优化成 8 个一般来说，肯定能有所提高，多重插入就是一 个非常实用的技能。一次读取，多次插入，有些场景是从一张表读取数据后，要多次利用，这时可以使用 multi insert 语法：
+											           需要的是，multi insert 语法有一些限制
+													   1、一般情况下，单个SQL中最多可以写128路输出，超过128路，则报语法错误。
+													   2、在一个multi insert中：对于分区表，同一个目标分区不允许出现多次。对于未分区表，该表不能出现多次。
+													   3、对于同一张分区表的不同分区，不能同时有insert overwrite和insert into操作，否则报错返回	
+
+										19、启动中间结果压缩
+													map 输出压缩
+
+													set mapreduce.map.output.compress=true; 
+													set mapreduce.map.output.compress.codec=org.apache.hadoop.io.compress.SnappyCodec;
+
+													中间数据压缩
+
+													        中间数据压缩就是对 hive 查询的多个 Job 之间的数据进行压缩。最好是选择一个节省CPU耗时的压缩方式。可以采用 snappy 压缩算法，该算法的压缩和解压效率都非常高。
+
+													set hive.exec.compress.intermediate=true; 
+													set hive.intermediate.compression.codec=org.apache.hadoop.io.compress.SnappyCodec; 
+													set hive.intermediate.compression.type=BLOCK;
+
+													结果数据压缩
+
+													        最终的结果数据（Reducer输出数据）也是可以进行压缩的，可以选择一个压缩效果比较好的，可以减少数据的大小和数据的磁盘读写时间 。
+
+													        需要注意：常用的 gzip，snappy 压缩算法是不支持并行处理的，如果数据源是 gzip/snappy压缩文件大文件，这样只会有有个 mapper 来处理这个文件，会严重影响查询效率。所以如果结果数据需要作为其他查询任务的数据源，可以选择支持 splitable 的 LZO 算法，这样既能对结果文件进行压缩，还可以并行的处理，这样就可以大大的提高 job 执行的速度了。
+
+													set hive.exec.compress.output=true; 
+													set mapreduce.output.fileoutputformat.compress=true; 
+													set mapreduce.output.fileoutputformat.compress.codec=org.apache.hadoop.io.compress.G zipCodec; 
+													set mapreduce.output.fileoutputformat.compress.type=BLOCK;	
+
+										20、Hive 架构层面
+
+													1、启用本地抓取
+													Hive 的某些 SQL 语句需要转换成 MapReduce 的操作，某些 SQL 语句就不需要转换成 MapReduce 操作，但是同学们需要注意，理论上来说，所有的 SQL 语句都需要转换成 MapReduce 操作，只不过 Hive 在转换 SQL 语句的过程中会做部分优化，使某些简单的操作不再需要转换成 MapReduce，例如：
+
+														1、只是 select * 的时候 
+														2、where 条件针对分区字段进行筛选过滤时 
+														3、带有 limit 分支语句时
+														        Hive 从 HDFS 中读取数据，有两种方式：启用MapReduce读取 和 直接抓取 。
+														        直接抓取数据比 MapReduce 方式读取数据要快的多，但是只有少数操作可以使用直接抓取方式 。
+														        可以通过 hive.fetch.task.conversion 参数来配置在什么情况下采用直接抓取方式：
+														minimal：只有 select * 、在分区字段上 where 过滤、有 limit 这三种场景下才启用直接抓取方式。
+														more：在 select、where 筛选、limit 时，都启用直接抓取方式 。
+
+													2、本地执行优化
+													        Hive在集群上查询时，默认是在集群上多台机器上运行，需要多个机器进行协调运行，这种方式很好地解决了大数据量的查询问题。但是在Hive查询处理的瓣量比较小的时候，其实没有必要启动分布 式模式去执行，因为以分布式方式执行设计到跨网络传输、多节点协调等，并且消耗资源。对于小数据 集，可以通过本地模式，在单台机器上处理所有任务，执行时间明显被缩短 。
+													        启动本地模式涉及到三个参数：	
+													        ##打开hive自动判断是否启动本地模式的开关
+															set hive.exec.mode.local.auto=true;
+															## map任务晝專大值,*启用本地模式的task最大皋数
+															set hive.exec.mode.1ocal.auto.input.files.max=4;
+															## map输入文件最大大小，不启动本地模式的最大输入文件大小
+															set hive.exec.mode.1ocal.auto.inputbytes.max=134217728;
+
+													3、JVM 重用
+													        Hive语句最终会转换为一系的MapReduce任务，每一个MapReduce任务是由一系的MapTask 和ReduceTask组成的，默认情况下，MapReduce中一个MapTask或者ReduceTask就会启动一个 JVM进程，一个Task执行完毕后，JVM进程就会退出。这样如果任务花费时间很短，又要多次启动 JVM的情况下，JVM的启动时间会变成一个比较大的消耗，这时，可以通过重用JVM来解决 。
+													            JVM也是有缺点的，开启JVM重用会一直占用使用到的task的插槽，以便进行重用，直到任务完成后才 会释放。如果某个不平衡的job中有几个reduce task执行的时间要比其他的reduce task消耗的时间 要多得多的话，那么保留的插槽就会一直空闲却无法被其他的job使用，直到所有的task都结束了才 会释放。
+        															根据经验，一般来说可以使用一个cpu core启动一个JVM，假如服务器有16个cpu core，但是这个 节点，可能会启动32个 mapTask ,完全可以考虑：启动一个JVM,执行两个Task 。
+													
+        											4、并行执行
+													        有的查询语句，Hive会将其转化为一个或多个阶段，包括：MapReduce阶段、抽样阶段、合并阶段、 limit阶段等。默认情况下，一次只执行一个阶段。但是，如果某些阶段不是互相依赖，是可以并行执行的。多阶段并行是比较耗系统资源的 。
+													        一个 Hive SQL语句可能会转为多个MapReduce Job,每一个 job 就是一个 stage , 这些Job顺序执行，这个在 client 的运行日志中也可以看到。但是有时候这些任务之间并不是相互依赖的，如果集群资源允许的话，可以让多个并不相互依赖 stage 并发执行，这样就节约了时间，提高了执行速度，但是如 果集群资源匮乏时，启用并行化反倒是会导致各个 Job 相互抢占资源而导致整体执行性能的下降。启用 并行化：
+
+													5、推测执行
+													        在分布式集群环境下，因为程序Bug（包括Hadoop本身的bug），负载不均衡或者资源分布不均等原因，会造成同一个作业的多个任务之间运行速度不一致，有些任务的运行速度可能明显慢于其他任务（比如一个作业的某个任务进度只有50%，而其他所有任务已经运行完毕），则这些任务会拖慢作业的整体执行进度。为了避免这种情况发生，Hadoop采用了推测执行（Speculative Execution）机制，它根据一定的法则推测出“拖后腿”的任务，并为这样的任务启动一个备份任务，让该任务与原始任务同时处理同一份数据，并最终选用最先成功运行完成任务的计算结果作为最终结果 。
+
+													6、Hive严格模式
+													        所谓严格模式，就是强制不允许用户执行有风险的 HiveQL 语句，一旦执行会直接失败。但是Hive中为了提高SQL语句的执行效率，可以设置严格模式，充分利用 Hive 的某些特点 。  
+													        ## 设置Hive的严格模式 
+															set hive.mapred.mode=strict; 
+															set hive.exec.dynamic.partition.mode=nostrict;      
+
+					   		
 -- 布局
 
 	一、每天布局
