@@ -38,7 +38,8 @@ public class TransFlatMap {
             if (value.getId().equals("sensor_1")) {
                 out.collect(value.getId());
             }else if (value.getId().equals("sensor_2")){
-                out.collect("Vc:"+value.getVc()+"-"+"Ts"+value.getTs());
+                out.collect(String.valueOf(value.getVc()));
+                out.collect(String.valueOf(value.getTs()));
             }
         }
     }
