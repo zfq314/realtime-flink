@@ -33,7 +33,7 @@ public class TransFilter {
         executionEnvironment.execute();
     }
 
-    private static class MyFilterFunction implements FilterFunction<WaterSensor> {
+    public static class MyFilterFunction implements FilterFunction<WaterSensor> {
         @Override
         public boolean filter(WaterSensor value) throws Exception {
             return value.id.equals("sensor_2");
